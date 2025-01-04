@@ -1,0 +1,113 @@
+from Bio.Blast import NCBIXML
+from Bio.Align.Applications import ClustalOmegaCommandline as COCL
+from Bio import Phylo, AlignIO
+from Bio.Phylo.TreeConstruction import DistanceCalculator as DC
+from Bio.Phylo.TreeConstruction import DistanceTreeConstructor as DTC
+import os
+
+def carregar_resultados_blast(ficheiro_blast):
+    """
+    Carrega os resultados do BLAST a partir de um ficheiro XML
+    e extrai as sequências homólogas das regiões de alinhamento significativas (HSPs - High-scoring Segment Pairs)
+    
+    Args:
+    - ficheiro_blast (str): Caminho do ficheiro BLAST XML.
+    
+    Returns:
+    - sequencias (list): Lista de sequências extraídas dos resultados do BLAST.
+    """
+    if not os.path.exists(ficheiro_blast):
+        raise FileNotFoundError(f"Ficheiro {ficheiro_blast} não encontrado.")
+    
+    blast_resultados = NCBIXML.parse(open(ficheiro_blast))  # retorna um objeto iterável que contém as informações dos alinhamentos de cada pesquisa BLAST
+    sequencias = []  # Lista onde as sequências extraídas dos alinhamentos serão armazenadas
+
+    # Iterando pelos resultados e alinhamentos
+    for resultado in blast_resultados:
+        for alinhamento in resultado.alignments:
+            for idx, hsp in enumerate(alinhamento.hsps):
+                # Gerar um identificador único para cada sequência baseado no índice do HSP
+                id_sequencia = f"{alinhamento.hit_id}_hsp{idx+1}"
+
+                # Formatar a sequência no formato FASTA
+                sequencia = f">{id_sequencia}\n{hsp.sbjct}\n"
+                sequencias.append(sequencia)
+
+    return sequencias
+
+def alinhar_sequencias(ficheiro_fasta, gene):
+    """
+    Alinha múltiplas sequências usando o Clustal Omega.
+    
+    Args:
+    - ficheiro_fasta (str): Caminho para o ficheiro FASTA contendo as sequências.
+    - gene (str): Nome do gene a ser alinhado.
+    
+    Returns:
+    - ficheiro_alinhado (str): Caminho do ficheiro com as sequências alinhadas.
+    """
+    diretorio = os.path.dirname(os.path.abspath(__file__))
+    caminho_clustalomega = os.path.join(diretorio, "clustal-omega/clustalo.exe")
+    
+    ficheiro_alinhado = f"{gene}_alinhado.fasta"
+    clustalomega_CL = COCL(caminho_clustalomega, infile=ficheiro_fasta, outfile=ficheiro_alinhado, force=True)
+    clustalomega_CL()
+    print(f"Alinhamento para {gene} salvo em {ficheiro_alinhado}")
+    
+    return ficheiro_alinhado
+
+def construir_arvore_filogenetica(ficheiro_alinhado, gene):
+    """
+    Constrói uma árvore filogenética a partir de sequências alinhadas.
+    
+    Args:
+    - ficheiro_alinhado (str): Caminho para o ficheiro com as sequências alinhadas.
+    - gene (str): Nome do gene a ser analisado.
+    
+    Returns:
+    - caminho_arvore (str): Caminho do ficheiro contendo a árvore filogenética.
+    """
+    alinhamento = AlignIO.read(ficheiro_alinhado, "fasta")
+
+    # Calcular a matriz de distâncias
+    calcular = DC("identity")
+    matriz_distancia = calcular.get_distance(alinhamento)
+
+    # Construir a árvore filogenética usando UPGMA
+    const = DTC()
+    arvore = const.upgma(matriz_distancia)
+
+    # Salvar a árvore filogenética
+    caminho_arvore = f"{gene}_arvore_filogenetica.newick"
+    Phylo.write(arvore, caminho_arvore, "newick")
+    print(f"Árvore filogenética para {gene} salva em {caminho_arvore}")
+    
+    return caminho_arvore
+
+def resultado_final(genes):
+    """
+    Executa o pipeline completo: carregar resultados do BLAST, alinhar sequências e construir árvore filogenética.
+    
+    Args:
+    - genes (list): Lista de genes a serem analisados.
+    """
+    for gene in genes:
+        ficheiro_blast = f"{gene}_blast.xml"
+
+        # Carregar resultados do BLAST
+        sequencias = carregar_resultados_blast(ficheiro_blast)
+
+        # Salvar sequências no formato FASTA
+        ficheiro_fasta = f"{gene}_alinhado.fasta"
+        with open(ficheiro_fasta, "w") as ficheiro:
+            ficheiro.writelines(sequencias)
+
+        # Alinhar as sequências
+        ficheiro_alinhado = alinhar_sequencias(ficheiro_fasta, gene)
+
+        # Construir a árvore filogenética
+        construir_arvore_filogenetica(ficheiro_alinhado, gene)
+
+# Exemplo de utilização
+genes = ["Colocar genes aqui"]
+resultado_final(genes)
